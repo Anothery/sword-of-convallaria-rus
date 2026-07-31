@@ -1,0 +1,5 @@
+UnityPy
+fonttools
+pillow
+scipy
+numpy
