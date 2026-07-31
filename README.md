@@ -48,8 +48,10 @@ LLM перевод **Sword of Convallaria** на русский язык.
 tools/    — весь инструментарий (Python 3.10+, см. requirements.txt)
 data/     — glossary_ru.json: глоссарий (~420 терминов), обязателен к соблюдению
             speaker_map.json: реплика → говорящий (40 611 строк диалогов)
-            speakers_gender.json: пол говорящих (1 761, ручная выверка)
+            speakers_gender.json: пол говорящих (1 761, выверка по веб-источникам)
 tm/       — tm_ru.json.gz: память переводов (141 516 строк, ключ = sha1(en)[:16])
+docs/     — справочник по игре: game_lore.md (мир, фракции, хронология),
+            characters.md (персонажи: пол, возраст, характер, род речи, отношения)
 ```
 
 Установка зависимостей: `pip install -r requirements.txt`
@@ -152,8 +154,10 @@ tm/       — tm_ru.json.gz: память переводов (141 516 строк
    `action_id` совпадает с id строки в `dblang_en/translation.json`.
    Итог: `data/speaker_map.json` (40 611 реплик, 1 759 говорящих).
 2. **`gender_assign.py`** — пол говорящих через LLM
-   (m/f/variable/unknown) + ручная выверка именованных персонажей и
-   толпы → `data/speakers_gender.json`. Плейсхолдеры:
+   (m/f/variable/unknown) + выверка именованных персонажей по
+   веб-источникам (fandom-вики, BWIKI, gamewith — см. `docs/characters.md`:
+   там же неочевидные случаи вроде Tristan/Lukamar/Rico — женщины)
+   → `data/speakers_gender.json`. Плейсхолдеры:
    `{玩家昵称}` (игрок) = neutral (нейтрализация), `{黑猫昵称}` (кот) = m.
 3. **`gender_fix.py queue|run|apply`** — находит RU-строки с гендерными
    формами (7,5 тыс.), исправляет через LLM по полу говорящего
