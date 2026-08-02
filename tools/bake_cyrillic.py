@@ -3,7 +3,7 @@
 
 v2 fixes the SDF convention after precise measurement of the original
 atlases (see DEVELOPER.md):
-  * atlas raster scale ~= 0.75 x point size (metrics stay full scale),
+  * atlas raster scale ~= 1.0 px per pt (metrics full pt);
     calibrated PER FONT from original glyphs (v=128 outline crossings);
   * SDF slope calibrated per font (32/px @36pt, ~25.5/px @48pt);
   * rect = tight bbox of the v>0 region (ramp reaches ~0 at rect edges,
@@ -46,10 +46,12 @@ def _crossings(prof):
 def calibrate(tt, atlases):
     """Measure (raster_scale, sdf_slope) of the original atlas.
 
-    raster_scale = outline span in atlas px / metrics span (should be ~0.75)
-    sdf_slope    = |dv/dx| at v=128 crossings (32/px for 36pt fonts)
+    raster_scale = ink bbox (v>=128) span in atlas px / metrics span.
+    Measured over ALL glyphs (median): mid-row crossings used before gave
+    ~0.77 and were WRONG — the true convention is ~1.0 px per pt.
+    sdf_slope = |dv/dx| at v=128 crossings (32/px for 36pt fonts).
     """
-    rx, ry, slopes = [], [], []
+    ratios, slopes = [], []
     for g in tt['m_GlyphTable']:
         r, m = g['m_GlyphRect'], g['m_Metrics']
         if r['m_Width'] <= 2 or m['m_Width'] < 6 or m['m_Height'] < 6:
@@ -60,23 +62,19 @@ def calibrate(tt, atlases):
         a = atlases[ai]
         y0 = a.shape[0] - r['m_Y'] - r['m_Height']
         reg = a[y0:y0 + r['m_Height'], r['m_X']:r['m_X'] + r['m_Width']]
-        if reg.size == 0 or not (reg > 128).any():
+        if reg.size == 0 or not (reg >= 128).any():
             continue
+        ys, xs = np.nonzero(reg >= 128)
+        iw = xs.max() - xs.min() + 1
+        ih = ys.max() - ys.min() + 1
+        ratios.append(iw / m['m_Width'])
+        ratios.append(ih / m['m_Height'])
         crx = _crossings(reg[reg.shape[0] // 2])
         cry = _crossings(reg[:, reg.shape[1] // 2])
-        if len(crx) >= 2:
-            span = crx[-1][0] - crx[0][0]
-            if span >= 5:
-                rx.append(span / m['m_Width'])
-            slopes += [s for _, s in crx if 5 < s < 64]
-        if len(cry) >= 2:
-            span = cry[-1][0] - cry[0][0]
-            if span >= 5:
-                ry.append(span / m['m_Height'])
-            slopes += [s for _, s in cry if 5 < s < 64]
-    if not rx or not slopes:
+        slopes += [s for _, s in crx + cry if 5 < s < 64]
+    if not ratios or not slopes:
         return None
-    scale = float(np.median(rx + ry))
+    scale = float(np.median(ratios))
     slope = float(np.median(slopes))
     return scale, slope
 
@@ -113,8 +111,9 @@ def sdf_bitmap(font_pil_big, ch, size_px, slope):
     h2, w2 = h // SUP * SUP, w // SUP * SUP
     v = v[:h2, :w2].reshape(h2 // SUP, SUP, w2 // SUP, SUP).mean(axis=(1, 3))
     v = v.astype(np.uint8)
-    # crop to bbox(v>0): ramp reaches 0 right at the rect edge (game convention)
-    nz = v > 0
+    # crop to bbox(v>=120): devs crop rects at the SDF centerline (v~128),
+    # NOT at v>0 — full-ramp rects render the glyph ~3-4px too low in game
+    nz = v >= 120
     ys, xs = np.nonzero(nz)
     v = v[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
     return v, v.shape[1], v.shape[0]
