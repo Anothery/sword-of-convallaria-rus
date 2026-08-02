@@ -120,8 +120,11 @@ def sdf_bitmap(font_pil_big, ch, size_px, slope):
     return v, v.shape[1], v.shape[0]
 
 
-def bake(mb_obj, tex_objs, font_ttf_path, charset, log=print):
-    """tex_objs: list of Texture2D object readers (atlas index 0..n)."""
+def bake(mb_obj, tex_objs, font_ttf_path, charset, log=print, dscale=1.0):
+    """tex_objs: list of Texture2D object readers (atlas index 0..n).
+    dscale: design-scale correction for cases where the source TTF's
+    design differs from the atlas' original glyphs (e.g. baking
+    Font_sys_en Cyrillic into the Font_sys atlas: ~0.954)."""
     tt = mb_obj.read_typetree()
     texs = [t.read() for t in tex_objs]
     atlases = [np.array(t.image.getchannel('A')) for t in texs]
@@ -152,6 +155,18 @@ def bake(mb_obj, tex_objs, font_ttf_path, charset, log=print):
             return None
         return pen.bounds  # xMin, yMin, xMax, yMax
 
+    # design-scale correction (source TTF design vs atlas' original design)
+    if dscale == 'auto':
+        # ratio: original Latin 'a' bearY in atlas / Cyrillic 'а' yMax from TTF
+        cmap_tt = {c['m_Unicode']: c['m_GlyphIndex'] for c in tt['m_CharacterTable']}
+        gmap_tt = {g['m_Index']: g for g in tt['m_GlyphTable']}
+        orig_a = gmap_tt[cmap_tt[0x61]]['m_Metrics']['m_HorizontalBearingY']
+        cyr_a_top = glyph_bounds(cmap[0x430])[3] * scale
+        dscale = orig_a / cyr_a_top
+    if dscale != 1.0:
+        scale *= dscale
+        log('dscale=%.4f applied' % dscale)
+
     # sanity: metrics convention check against an existing char
     have = {c['m_Unicode'] for c in tt['m_CharacterTable']}
     if 65 in have:
@@ -161,8 +176,8 @@ def bake(mb_obj, tex_objs, font_ttf_path, charset, log=print):
         log('calib A: bundle adv=%.3f computed=%.3f' % (
             gm['m_Metrics']['m_HorizontalAdvance'], adv))
 
-    font_big = ImageFont.truetype(font_ttf_path, max(8, round(pt * rscale * SUP)))
-    raster_px = pt * rscale
+    font_big = ImageFont.truetype(font_ttf_path, max(8, round(pt * rscale * dscale * SUP)))
+    raster_px = pt * rscale * dscale
 
     next_index = max(g['m_Index'] for g in tt['m_GlyphTable']) + 1
 
@@ -281,6 +296,11 @@ def main():
     # optional: AssetName=path.ttf overrides for source fonts
     tight = '--tight' in sys.argv
     single = '--single' in sys.argv
+    dscale = 1.0
+    for a in sys.argv[4:]:
+        if a.startswith('--dscale'):
+            v = a.split('=', 1)[1]
+            dscale = v if v == 'auto' else float(v)
     overrides = {}
     for a in [x for x in sys.argv[4:] if not x.startswith('--')]:
         k, v = a.split('=', 1)
@@ -323,7 +343,9 @@ def main():
             continue
         print('== baking %s (font %s, atlases %d)' % (name, os.path.basename(font_path), len(tex_objs)))
         charset = RUS + EXTRA if tight else CYR + EXTRA
-        bake(o, tex_objs, font_path, charset)
+        # dscale применяем только к ассетам с чужим дизайном TTF (override)
+        ds = dscale if name in overrides else 1.0
+        bake(o, tex_objs, font_path, charset, dscale=ds)
 
     env.save(pack='lz4', out_path=out_dir)
     print('saved ->', out_dir)
